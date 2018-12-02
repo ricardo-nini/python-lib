@@ -1,0 +1,5 @@
+title1: um otimo programa
+title2: um dia lindo ç á à ã
+arquivo_nao_existe: Arquivo {:s} não encontrado no {:s} código {:d}.
+sistema1: sistema
+url_nao_encontrada: A url:{:s} na porta {:d} não responde.
