@@ -3,7 +3,6 @@
 
 import fcntl
 import os
-import re
 import time
 import threading
 import logging

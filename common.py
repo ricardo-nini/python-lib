@@ -5,39 +5,39 @@ import struct
 import enum
 import zlib
 import socket
-import configparser
 import functools
 import platform
+import threading
 import os
-import psutil
-import json
+import sys
+import configparser
 import fcntl
 import subprocess
+import logging
+from pathlib import Path, PosixPath
 from datetime import datetime
-from collections import namedtuple
 
 if platform.uname().system == 'Linux':
     import netifaces
 
+_UNSET = object()
+
+
+# =============================================================================#
+class _const:
+    class ConstError(TypeError):
+        pass
+
+    def __setattr__(self, name, value):
+        if name in self.__dict__ and value != self.__dict__[name]:
+            raise self.ConstError("Can't rebind const(%s)" % name)
+        self.__dict__[name] = value
+
+
+CONST = _const()
+
 # Equivalent of the _IO('U', 20) constant in the linux kernel.
-USBDEVFS_RESET = ord('U') << (4 * 2) | 20
-
-snetio = namedtuple('snetio', ['iface',
-                               'bytes_sent', 'bytes_recv',
-                               'packets_sent', 'packets_recv',
-                               'errin', 'errout',
-                               'dropin', 'dropout'])
-
-snetiodiff = namedtuple('snetiodiff', ['iface',
-                                       'bytes_sent_start', 'bytes_recv_start',
-                                       'packets_sent_start', 'packets_recv_start',
-                                       'errin_start', 'errout_start',
-                                       'dropin_start', 'dropout_start',
-                                       'bytes_sent_last', 'bytes_recv_last',
-                                       'packets_sent_last', 'packets_recv_last',
-                                       'errin_last', 'errout_last',
-                                       'dropin_last', 'dropout_last'
-                                       ])
+CONST.USBDEVFS_RESET = ord('U') << (4 * 2) | 20
 
 
 # =============================================================================#
@@ -75,6 +75,7 @@ def toggle_bit(int_type, offset):
 
 
 # =============================================================================#
+# internal use by crc32f(), crc32(), adler32f() and adler32
 def __zlib_csum(fd, func):
     csum = None
     chunk = fd.read(1024)
@@ -247,14 +248,14 @@ def get_device_path_by_id(id):
 # reset usb device by device path
 def send_usb_reset(dev_path):
     """
-        Sends the USBDEVFS_RESET IOCTL to a USB device.
+        Sends the CONST.USBDEVFS_RESET IOCTL to a USB device.
 
         dev_path - The devfs path to the USB device (under /dev/bus/usb/)
                    See get_teensy for example of how to obtain this.
     """
     fd = os.open(dev_path, os.O_WRONLY)
     try:
-        fcntl.ioctl(fd, USBDEVFS_RESET, 0)
+        fcntl.ioctl(fd, CONST.USBDEVFS_RESET, 0)
     finally:
         os.close(fd)
 
@@ -270,6 +271,33 @@ def int2ip(addr):
 
 
 # =============================================================================#
+class RLogFilter(logging.Filter):
+    def __init__(self, names: tuple):
+        super().__init__(names)
+
+    def filter(self, record):
+        if self.nlen == 0:
+            return True
+        else:
+            for name in self.name:
+                if name == record.name:
+                    return True
+            return False
+
+
+# =============================================================================#
+class RLogHandler(logging.StreamHandler):
+    def __init__(self, *args, **kwargs):
+        if isinstance(args, tuple) and len(args) > 0:
+            a = (args[0],)
+            logging.StreamHandler.__init__(self, *a, **kwargs)
+            if len(args) > 1 and isinstance(args[1], tuple) and len(args[1]) > 0:
+                self.addFilter(RLogFilter(args[1]))
+        else:
+            logging.StreamHandler.__init__(self, *args, **kwargs)
+
+
+# =============================================================================#
 class RByteType(enum.Enum):
     BYTE8 = 8
     BYTE16 = 16
@@ -277,136 +305,6 @@ class RByteType(enum.Enum):
     BYTE64 = 64
     FLOAT = 33
     DOUBLE = 65
-
-
-# =============================================================================#
-class RNetStats(object):
-    def __init__(self, filename: str, iface='all', start: bool = False,
-                 ramdisk='/dev/shm'):
-        self._filename = filename
-        self._iface = iface
-        self._ramdisk = os.path.join(ramdisk, os.path.basename(filename))
-        if start and os.path.isfile(filename):
-            with open(filename, 'r') as f:
-                a = snetio(*json.load(f))
-                self._start_counter(a)
-        else:
-            self._start_counter(snetio('all', 0, 0, 0, 0, 0, 0, 0, 0))
-
-    @property
-    def netstats(self) -> snetio:
-        with open(self._ramdisk, 'r') as f:
-            r = snetiodiff(*json.load(f))
-            a = snetio(
-                iface=self._iface,
-                bytes_sent=r.bytes_sent_last - r.bytes_sent_start,
-                bytes_recv=r.bytes_recv_last - r.bytes_recv_start,
-                packets_sent=r.packets_sent_last - r.packets_sent_start,
-                packets_recv=r.packets_recv_last - r.packets_recv_start,
-                errin=r.errin_last - r.errin_start,
-                errout=r.errout_last - r.errout_start,
-                dropin=r.dropin_last - r.dropin_start,
-                dropout=r.dropout_last - r.dropout_start
-            )
-            return a
-
-    def update_counter(self):
-        with open(self._ramdisk, 'r') as f:
-            l = snetiodiff(*json.load(f))
-            a = psutil.net_io_counters(pernic=self._iface != 'all', nowrap=True)
-            if self._iface != 'all':
-                if self._iface in a:
-                    a = a[self._iface]
-                else:
-                    return
-            r = snetiodiff(
-                iface=self._iface,
-                bytes_sent_start=l.bytes_sent_start,
-                bytes_recv_start=l.bytes_recv_start,
-                packets_sent_start=l.packets_sent_start,
-                packets_recv_start=l.packets_recv_start,
-                errin_start=l.errin_start,
-                errout_start=l.errout_start,
-                dropin_start=l.dropin_start,
-                dropout_start=l.dropout_start,
-                bytes_sent_last=a.bytes_sent,
-                bytes_recv_last=a.bytes_recv,
-                packets_sent_last=a.packets_sent,
-                packets_recv_last=a.packets_recv,
-                errin_last=a.errin,
-                errout_last=a.errout,
-                dropin_last=a.dropin,
-                dropout_last=a.dropout
-            )
-            with open(self._ramdisk, 'w') as f:
-                json.dump(r, f)
-
-    def save_counter(self):
-        a = self.netstats
-        with open(self._filename, 'w') as f:
-            json.dump(a, f)
-
-    def load_counter(self) -> snetio:
-        if os.path.isfile(self._filename):
-            with open(self._filename, 'r') as f:
-                return snetio(*json.load(f))
-        else:
-            return snetio(self._iface, 0, 0, 0, 0, 0, 0, 0, 0)
-
-    def reset_counter(self):
-        self._start_counter(snetio(self._iface, 0, 0, 0, 0, 0, 0, 0, 0))
-
-    def _start_counter(self, start: snetio):
-        a = psutil.net_io_counters(pernic=self._iface != 'all', nowrap=True)
-        if self._iface != 'all':
-            if self._iface in a:
-                a = a[self._iface]
-            else:
-                a = snetio('all', 0, 0, 0, 0, 0, 0, 0, 0)
-        r = snetiodiff(
-            iface=self._iface,
-            bytes_sent_start=a.bytes_sent - start.bytes_sent,
-            bytes_recv_start=a.bytes_recv - start.bytes_recv,
-            packets_sent_start=a.packets_sent - start.packets_sent,
-            packets_recv_start=a.packets_recv - start.packets_recv,
-            errin_start=a.errin - start.errin,
-            errout_start=a.errout - start.errout,
-            dropin_start=a.dropin - start.dropin,
-            dropout_start=a.dropout - start.dropout,
-            bytes_sent_last=a.bytes_sent,
-            bytes_recv_last=a.bytes_recv,
-            packets_sent_last=a.packets_sent,
-            packets_recv_last=a.packets_recv,
-            errin_last=a.errin,
-            errout_last=a.errout,
-            dropin_last=a.dropin,
-            dropout_last=a.dropout
-        )
-        with open(self._ramdisk, 'w') as f:
-            json.dump(r, f)
-
-
-# =============================================================================#
-class RPair:
-    def __init__(self, value, key):
-        self.value = value
-        self.key = key
-
-    @classmethod
-    def create(cls):
-        return cls(0, 0)
-
-    def get_key(self):
-        return self.key
-
-    def set_key(self, key):
-        self.key = key
-
-    def get_value(self):
-        return self.value
-
-    def set_value(self, value):
-        self.value = value
 
 
 # =============================================================================#
@@ -478,12 +376,12 @@ class RData(bytearray):
                 s = '<'
             s += 'd'
         else:
-            return None
+            raise ValueError('Invalid value of byte!')
         return s
 
-    def add_byte(self, bytetype: RByteType, data, signed=False, bigendian=False) -> None:
+    def add_byte(self, bytetype: RByteType, data, signed=False, bigendian=False):
         s = self.__genpackfmt(bytetype, signed, bigendian)
-        self += struct.pack(s, data)
+        self.extend(struct.pack(s, data))
 
     def get_byte(self, bytetype: RByteType, item, signed=False, bigendian=False):
         s = self.__genpackfmt(bytetype, signed, bigendian)
@@ -501,28 +399,28 @@ class RData(bytearray):
         self[item:item + int(c / 8)] = v[0:int(c / 8)]
 
     def is_bit(self, bit_index, offset=0) -> bool:
-        addr = RPair.create()
+        addr = {}
         self.__calcule_bit_addr(bit_index, addr, offset)
-        n = self[addr.key]
-        return is_bit(n, addr.value)
+        n = self[addr['key']]
+        return is_bit(n, addr['value'])
 
     def set_bit(self, bit_index, offset=0):
-        addr = RPair.create()
+        addr = {}
         self.__calcule_bit_addr(bit_index, addr, offset)
-        actual = self[addr.key]
-        self[addr.key] = set_bit(actual, addr.value)
+        actual = self[addr['key']]
+        self[addr['key']] = set_bit(actual, addr['value'])
 
     def clear_bit(self, bit_index, offset=0):
-        addr = RPair.create()
+        addr = {}
         self.__calcule_bit_addr(bit_index, addr, offset)
-        actual = self[addr.key]
-        self[addr.key] = clear_bit(actual, addr.value)
+        actual = self[addr['key']]
+        self[addr['key']] = clear_bit(actual, addr['value'])
 
     def toggle_bit(self, bit_index, offset=0):
-        addr = RPair.create()
+        addr = {}
         self.__calcule_bit_addr(bit_index, addr, offset)
-        actual = self[addr.key]
-        self[addr.key] = toggle_bit(actual, addr.value)
+        actual = self[addr['key']]
+        self[addr['key']] = toggle_bit(actual, addr['value'])
 
     def put_bit(self, bit_index, bit: bool, offset=0):
         if bit:
@@ -558,7 +456,7 @@ class RData(bytearray):
                 x = x + sizeblock
         return cls(b)
 
-    def __calcule_bit_addr(self, bit_index, addr: RPair, offset=0):
+    def __calcule_bit_addr(self, bit_index, addr: dict, offset=0):
         rev = False
         if (bit_index < 0):
             rev = True
@@ -566,11 +464,11 @@ class RData(bytearray):
         b = int(bit_index / 8)
         if len(self) <= b:
             raise IndexError
-        addr.value = bit_index % 8  # value -> bit
+        addr['value'] = bit_index % 8  # value -> bit
         if rev:
-            addr.key = len(self) - b - 1  # key -> byte
+            addr['key'] = len(self) - b - 1  # key -> byte
         else:
-            addr.key = b + offset  # key -> byte
+            addr['key'] = b + offset  # key -> byte
 
 
 # =============================================================================#
@@ -580,119 +478,136 @@ class RConfigError(Exception):
 
 
 # =============================================================================#
-class RConfig:
-    def __init__(self, config: configparser.ConfigParser):
+class RConfig(object):
+    lock = threading.Lock()
+
+    def __init__(self, defaults=None, dict_type=configparser._default_dict,
+                 allow_no_value=False, *, delimiters=('=', ':'),
+                 comment_prefixes=('#', ';'), inline_comment_prefixes=None,
+                 strict=True, empty_lines_in_values=True,
+                 default_section=configparser.DEFAULTSECT,
+                 interpolation=configparser._UNSET, converters=configparser._UNSET):
+        self._config = configparser.ConfigParser(defaults=defaults, dict_type=dict_type,
+                                                 allow_no_value=allow_no_value, delimiters=delimiters,
+                                                 comment_prefixes=comment_prefixes,
+                                                 inline_comment_prefixes=inline_comment_prefixes,
+                                                 strict=strict, empty_lines_in_values=empty_lines_in_values,
+                                                 default_section=default_section,
+                                                 interpolation=interpolation, converters=converters)
+        self._filename = str()
+        self._p0 = PosixPath()
+        self._p1 = PosixPath()
+        self._names = []
+
+    @property
+    def conf(self):
+        return self._config
+
+    @property
+    def names(self):
+        return self._names
+
+    @property
+    def p0(self) -> PosixPath:
+        return self._p0
+
+    @property
+    def p1(self) -> PosixPath:
+        return self._p1
+
+    # raise FileNotFoundError when filename joined with paths not exist
+    def read(self, filename: str, paths=None):
+        RConfig.lock.acquire()
+        try:
+            self._filename = filename
+            # build paths
+            if isinstance(paths, tuple):
+                self._paths = paths
+            else:
+                if paths and isinstance(paths, str):
+                    self._paths = (paths,)
+                else:
+                    self._paths = (os.path.dirname(os.path.abspath(sys.argv[0])),)
+            # look for paths to file and file default in order ...
+            for path in self._paths:
+                p0 = Path(path, self._filename)
+                p1 = Path(path, self._add_defatlt_prefix(self._filename))
+                if p0.is_file() and p1.is_file():
+                    self._load((p0, p1))
+                    self._p0 = p0
+                    self._p1 = p1
+                    return
+            # look for paths to file in order ...
+            for path in self._paths:
+                p0 = Path(path, self._filename)
+                if p0.is_file():
+                    self._load((p0,))
+                    self._p0 = p0
+                    self._p1 = PosixPath()
+                    return
+            raise FileNotFoundError('file:{} paths:{}'.format(filename, paths))
+        finally:
+            RConfig.lock.release()
+
+    def write(self):
+        RConfig.lock.acquire()
+        try:
+            if len(self._p0.parents) > 0:
+                with open(str(self._p0), 'w') as f:
+                    self._config.write(f)
+            else:
+                raise ValueError('No loaded config.')
+        finally:
+            RConfig.lock.release()
+
+    def write2default(self):
+        RConfig.lock.acquire()
+        try:
+            if len(self._p1.parents) > 0:
+                with open(str(self._p1), 'w') as f:
+                    self._config.write(f)
+            else:
+                raise ValueError('No default loaded config.')
+        finally:
+            RConfig.lock.release()
+
+    def get_items(self, section) -> dict:
+        return dict(self._config.items(section))
+
+    def _load(self, paths: tuple, encoding=None):
+        if len(paths) == 2:
+            p = [paths[1]._str, paths[0]._str]
+        else:
+            p = paths[0]._str
+        self._config.read(p, encoding)
+        self._names = p
+
+    def _add_defatlt_prefix(self, filename) -> str:
+        p = os.path.splitext(filename)
+        return p[0] + '.def' + p[1]
+
+
+# =============================================================================#
+class RConfigParms(object):
+    def __init__(self, section, config: RConfig, main_section=''):
+        self._section = section
         self._config = config
+        self._main_section = main_section
 
-    def get(self, section, option, fallback=None) -> str:
-        try:
-            r = self._config.get(section, option, fallback=fallback)
-        except:
-            r = fallback
-        return r
+    @property
+    def section(self):
+        return self._section
 
-    def set(self, section, option, value: str):
-        self._config.set(section, option, value)
+    @property
+    def config(self):
+        return self._config
 
-    def getbool(self, section, option, fallback=None) -> bool:
-        try:
-            r = self._config.getboolean(section, option, fallback=fallback)
-        except:
-            r = fallback
-        return r
+    @property
+    def main_section(self):
+        return self._main_section
 
-    def setbool(self, section, option, value: bool):
-        v = str(value)
-        self._config.set(section, option, v)
-
-    def getint(self, section, option, fallback=None) -> int:
-        try:
-            r = self._config.getint(section, option, fallback=fallback)
-        except:
-            r = fallback
-        return r
-
-    def setint(self, section, option, value: int):
-        v = str(value)
-        self._config.set(section, option, v)
-
-    def getfloat(self, section, option, fallback=None) -> float:
-        try:
-            r = self._config.getfloat(section, option, fallback=fallback)
-        except:
-            r = fallback
-        return r
-
-    def setfloat(self, section, option, value: float):
-        v = str(value)
-        self._config.set(section, option, v)
-
-    def has_section(self, section) -> bool:
-        return self._config.has_section(section)
-
-    def has_option(self, section, option) -> bool:
-        return self._config.has_option(section, option)
-
-
-# =============================================================================#
-def teste_rdata():
-    r = RData()
-    for i in range(30):
-        r.append(255)
-        r.append(3)
-        r.append(4)
-        r.append(6)
-        r.append(65)
-        r.append(67)
-        r.append(45)
-        r.append(20)
-        r.append(32)
-        r.append(78)
-        r.append(100)
-        r.append(120)
-    print(r.dump())
-
-    r.add_byte(RByteType.BYTE8, 67)
-    r.add_byte(RByteType.BYTE16, -32456, True)
-    r.add_byte(RByteType.BYTE32, 340992)
-    r.add_byte(RByteType.BYTE64, 340992)
-
-    print(r.get_byte(RByteType.BYTE8, 0))
-    print(r.get_byte(RByteType.BYTE16, 1))
-    print(r.get_byte(RByteType.BYTE32, 3))
-    print(r.get_byte(RByteType.BYTE64, 7))
-
-    r.set_byte(RByteType.BYTE8, 1, 129)
-    r.set_byte(RByteType.BYTE16, 2, 65533)
-    r.set_byte(RByteType.BYTE32, 4, 3998472)
-    r.set_byte(RByteType.BYTE64, 8, 1450245273446974212)
-    r.set_byte(RByteType.FLOAT, 16, 341.23423)
-    r.set_byte(RByteType.DOUBLE, 24, 12123134.235123234)
-    print(r.dump())
-    print(r.get_byte(RByteType.FLOAT, 16))
-    print(r.get_byte(RByteType.DOUBLE, 24))
-
-    d = r.get_byte(RByteType.BYTE8, 0)
-    print(d)
-    print(r.is_bit(-5))
-    r.toggle_bit(-5)
-    print(r.is_bit(-5))
-    r.toggle_bit(5)
-    print(r.dump())
-
-    t = RData([1, 2, 3, 4, 5, 6])
-    print(t.dump())
-
-
-# =============================================================================#
-import unittest
-
-
-class TestCommon(unittest.TestCase):
-    def test_rdata(self):
-        teste_rdata()
-
-
-# =============================================================================#
-if __name__ == '__main__':
-    unittest.main()
+    def str(self):
+        ret = str()
+        for c in self._config.conf.options(self._section):
+            ret = ret + c + '=' + self._config.conf.get(self._section, c) + ';'
+        return ret

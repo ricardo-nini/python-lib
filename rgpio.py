@@ -12,10 +12,10 @@ def isSunxi() -> bool:
     return ('sunxi' in platform.uname().release or 'OrangePI' in platform.uname().node)
 
 
-if isRaspberry():
-    import RPi.GPIO as GPIO
-elif isSunxi():
+if isSunxi():
     import OPi.GPIO as GPIO
+elif isRaspberry():
+    import RPi.GPIO as GPIO
 else:
     raise Exception('Not know processor !')
 

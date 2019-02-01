@@ -3,9 +3,15 @@
 
 import serial
 import threading
-import configparser
-import rlib.common as common
-import rlib._rserial as CONST
+from rlib.common import RConfig, RConfigParms, RConfigError
+from rlib.common import CONST
+
+CONST.DEVICE = 'Device'
+CONST.BAUDRATE = 'Baudrate'
+CONST.DATABITS = 'Databits'
+CONST.PARITY = 'Parity'
+CONST.STOPBITS = 'Stopbits'
+CONST.TIMEOUT = 'Timeout'
 
 
 # =============================================================================#
@@ -28,149 +34,56 @@ class RSerialParms(object):
 
 
 # =============================================================================#
-class RSerialConfig(object):
-    def __init__(self, section, config: configparser.ConfigParser):
-        self._conf = common.RConfig(config)
-        self.section = section
-
+class RSerialConfig(RConfigParms):
     def read(self) -> RSerialParms:
-        device = self._conf.get(self.section, CONST.RSERIAL.DEVICE, None)
-        if not device:
-            raise common.RConfigError(CONST.RSERIAL.DEVICE)
-        baudrate = self._conf.getint(self.section, CONST.RSERIAL.BAUDRATE, CONST.RSERIAL.DEF_BAUDRATE)
-        databits = self._conf.getint(self.section, CONST.RSERIAL.DATABITS, CONST.RSERIAL.DEF_DATABITS)
-        parity = self._conf.get(self.section, CONST.RSERIAL.PARITY, CONST.RSERIAL.DEF_PARITY)
-        stopbits = self._conf.getint(self.section, CONST.RSERIAL.STOPBITS, CONST.RSERIAL.DEF_STOPBITS)
-        timeout = self._conf.getint(self.section, CONST.RSERIAL.TIMEOUT, CONST.RSERIAL.DEF_TIMEOUT)
+        device = self._config.conf.get(self.section, CONST.DEVICE)
+        baudrate = self._config.conf.getint(self.section, CONST.BAUDRATE)
+        databits = self._config.conf.getint(self.section, CONST.DATABITS)
+        parity = self._config.conf.get(self.section, CONST.PARITY)
+        stopbits = self._config.conf.getint(self.section, CONST.STOPBITS)
+        timeout = self._config.conf.getint(self.section, CONST.TIMEOUT)
         return RSerialParms(device, baudrate, databits, parity, stopbits, timeout)
 
     def write(self, parms: RSerialParms):
-        self._conf.set(self.section, CONST.RSERIAL.DEVICE, parms.device)
-        self._conf.setint(self.section, CONST.RSERIAL.BAUDRATE, parms.baudrate)
-        self._conf.setint(self.section, CONST.RSERIAL.DATABITS, parms.databits)
-        self._conf.set(self.section, CONST.RSERIAL.PARITY, parms.parity)
-        self._conf.setint(self.section, CONST.RSERIAL.STOPBITS, parms.stopbits)
-        self._conf.setint(self.section, CONST.RSERIAL.TIMEOUT, parms.timeout)
+        self._config.conf.set(self.section, CONST.DEVICE, parms.device)
+        self._config.conf.set(self.section, CONST.BAUDRATE, parms.baudrate)
+        self._config.conf.set(self.section, CONST.DATABITS, parms.databits)
+        self._config.conf.set(self.section, CONST.PARITY, parms.parity)
+        self._config.conf.set(self.section, CONST.STOPBITS, parms.stopbits)
+        self._config.conf.set(self.section, CONST.TIMEOUT, parms.timeout)
+        super().write(parms)
 
 
-# # =============================================================================#
-# class RSerialComm:
-#     def __init__(self):
-#         self._serial.port = '/dev/ttyAMA0'
-#         self._serial.baudrate = 9600
-#         self._serial.bytesize = 8
-#         self._serial.parity = self.parms.parity
-#         self._serial.stopbits = self.parms.stopbits
-#         self._serial.timeout = self.parms.timeout / 1000
-#
-#     @property
-#     def port(self):
-#         return self._port
-#
-#     @port.setter
-#     def port(self, port):
-#         self._port = port
-#
-#     @property
-#     def baudrate(self):
-#         return self._baudrate
-#
-#     @baudrate.setter
-#     def baudrate(self, baudrate):
-#         self._baudrate = baudrate
-#
-#     @property
-#     def bytesize(self):
-#         return self._bytesize
-#
-#     @bytesize.setter
-#     def bytesize(self, bytesize):
-#         self._bytesize = bytesize
-#
-#     @property
-#     def parity(self):
-#         return self._parity
-#
-#     @parity.setter
-#     def parity(self, parity):
-#         self._parity = parity
-#
-#     @property
-#     def stopbits(self):
-#         return self._stopbits
-#
-#     @stopbits.setter
-#     def stopbits(self, stopbits):
-#         self._stopbits = stopbits
-#
-#     @property
-#     def timeout(self):
-#         return self._timeout
-#
-#     @timeout.setter
-#     def timeout(self, timeout):
-#         self._timeout = timeout
-#
-#     def open(self):
-#         pass
-#
-#     def isOpen(self):
-#         pass
-#
-#     def close(self):
-#         pass
-#
-#     def flush(self):
-#         pass
-#
-#     def read(self, size):
-#         pass
-#
-#     def write(self, data):
-#         pass
-#
-#
 # =============================================================================#
-class RSerialComm:
+class RSerialComm():
     threadLock = threading.Lock()
 
     def __init__(self, parms: RSerialParms):
         self.parms = parms
         self._serial = None
-        # self._serial = serial.Serial()
 
     def open(self):
         RSerialComm.threadLock.acquire()
         try:
             if self._serial:
                 self._serial.close()
-
-            # if self._serial.isOpen():
-            #     self._serial.close()
-
             self._serial = serial.Serial(port=self.parms.device,
                                          baudrate=self.parms.baudrate,
                                          bytesize=self.parms.databits,
                                          parity=self.parms.parity,
                                          timeout=self.parms.timeout / 1000)
-
-            # self._serial.port = self.parms.device
-            # self._serial.baudrate = self.parms.baudrate
-            # self._serial.bytesize = self.parms.databits
-            # self._serial.parity = self.parms.parity
-            # self._serial.stopbits = self.parms.stopbits
-            # self._serial.timeout = self.parms.timeout / 1000
-            # self._serial.open()
-            RSerialComm.threadLock.release()
         except Exception:
-            RSerialComm.threadLock.release()
             raise
+        finally:
+            RSerialComm.threadLock.release()
 
     def close(self):
         RSerialComm.threadLock.acquire()
-        if self.is_open():
-            self._serial.close()
-        RSerialComm.threadLock.release()
+        try:
+            if self.is_open():
+                self._serial.close()
+        finally:
+            RSerialComm.threadLock.release()
 
     def is_open(self):
         if self._serial:
@@ -231,7 +144,7 @@ def teste_serial():
 # =============================================================================#
 def teste_rserial():
     try:
-        config = configparser.ConfigParser()
+        config = RConfig()
         config.read('rserial.ini')
         config_serial = RSerialConfig('Serial', config)
         serial = RSerialComm(config_serial.read())
@@ -254,23 +167,7 @@ def teste_rserial():
         with open('rserial.ini', 'w') as configfile:
             config.write(configfile)
 
-    except common.RConfigError as e:
+    except RConfigError as e:
         print('Error setting "' + e.setting + '"')
     except Exception as e:
         print(str(e))
-
-
-# =============================================================================#
-import unittest
-
-
-class TestCommon(unittest.TestCase):
-    def test_rserial(self):
-        teste_serial()
-        teste_rserial()
-
-
-# =============================================================================#
-if __name__ == '__main__':
-    # unittest.main()
-    teste_rserial()

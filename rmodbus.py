@@ -4,12 +4,98 @@
 import enum
 import struct
 import time
-import platform
-import rlib.rgpio as GPIO
-from rlib.common import RData, RByteType, RConfigError
+from rlib.common import RData, RByteType, RConfigError, RConfig, _const, CONST
 from rlib.rserial import RSerialComm, RSerialConfig, RSerialParms
-from configparser import ConfigParser, ExtendedInterpolation
-from rlib._rmodbus import RMODBUS
+from configparser import ExtendedInterpolation
+
+RMODBUS = _const()
+
+RMODBUS.INITIAL_MODBUS = 0xFFFF
+RMODBUS.INITIAL_DF1 = 0x0000
+
+RMODBUS.DEFAULT = 0
+RMODBUS.SLAVE = 0
+RMODBUS.FUNCTION = 1
+RMODBUS.ADDR = 2
+RMODBUS.QTY = 4
+RMODBUS.COIL = 4
+RMODBUS.REGISTER = 4
+RMODBUS.SUBFUNC = 2
+RMODBUS.DATADIAG = 4
+RMODBUS.QUERY_BYTECOUNT = 6
+RMODBUS.RESPONSE_BYTECOUNT = 2
+RMODBUS.EXCEPTION = 2
+
+RMODBUS.COIL_TRUE = 0xff00
+RMODBUS.COIL_FALSE = 0x0000
+
+RMODBUS.SIZE_3 = 3
+RMODBUS.SIZE_7 = 7
+RMODBUS.SIZE_6 = 6
+
+RMODBUS.EXCEPTION_ITEM_NOT_EXIST = 0
+RMODBUS.EXCEPTION_NOT_APPLICABLE = 1
+RMODBUS.EXCEPTION_INVALID_DATA = 2
+RMODBUS.EXCEPTION_INVALID_CRC = 3
+RMODBUS.EXCEPTION_INVALID_FUNCTION = 4
+RMODBUS.EXCEPTION_INVALID_SIZE = 5
+RMODBUS.EXCEPTION_INVALID_BYTECOUNT = 6
+RMODBUS.EXCEPTION_NO_ANSWER = 7
+RMODBUS.EXCEPTION_UNKNOWN = 8
+RMODBUS.EXCEPTION_NOT_USEFUL = 9
+RMODBUS.EXCEPTION_MESSAGE = 10
+RMODBUS.EXCEPTION_BUFFER_OVERFLOW = 11
+
+RMODBUS.EXCEPTION_DIC = {
+    RMODBUS.EXCEPTION_ITEM_NOT_EXIST: "Item not exist",
+    RMODBUS.EXCEPTION_NOT_APPLICABLE: "Not applicable",
+    RMODBUS.EXCEPTION_INVALID_DATA: "Invalid data",
+    RMODBUS.EXCEPTION_INVALID_CRC: "Invalid CRC",
+    RMODBUS.EXCEPTION_INVALID_FUNCTION: "Invalid function",
+    RMODBUS.EXCEPTION_INVALID_SIZE: "Invalid size",
+    RMODBUS.EXCEPTION_INVALID_BYTECOUNT: "Invalid bytecount",
+    RMODBUS.EXCEPTION_NO_ANSWER: "No answer",
+    RMODBUS.EXCEPTION_UNKNOWN: "Unknown error",
+    RMODBUS.EXCEPTION_NOT_USEFUL: "Not useful",
+    RMODBUS.EXCEPTION_MESSAGE: "Message exception received",
+    RMODBUS.EXCEPTION_BUFFER_OVERFLOW: "Receive buffer overflow"
+}
+
+RMODBUS.CRC_TABLE = (
+    0x0000, 0xC0C1, 0xC181, 0x0140, 0xC301, 0x03C0, 0x0280, 0xC241,
+    0xC601, 0x06C0, 0x0780, 0xC741, 0x0500, 0xC5C1, 0xC481, 0x0440,
+    0xCC01, 0x0CC0, 0x0D80, 0xCD41, 0x0F00, 0xCFC1, 0xCE81, 0x0E40,
+    0x0A00, 0xCAC1, 0xCB81, 0x0B40, 0xC901, 0x09C0, 0x0880, 0xC841,
+    0xD801, 0x18C0, 0x1980, 0xD941, 0x1B00, 0xDBC1, 0xDA81, 0x1A40,
+    0x1E00, 0xDEC1, 0xDF81, 0x1F40, 0xDD01, 0x1DC0, 0x1C80, 0xDC41,
+    0x1400, 0xD4C1, 0xD581, 0x1540, 0xD701, 0x17C0, 0x1680, 0xD641,
+    0xD201, 0x12C0, 0x1380, 0xD341, 0x1100, 0xD1C1, 0xD081, 0x1040,
+    0xF001, 0x30C0, 0x3180, 0xF141, 0x3300, 0xF3C1, 0xF281, 0x3240,
+    0x3600, 0xF6C1, 0xF781, 0x3740, 0xF501, 0x35C0, 0x3480, 0xF441,
+    0x3C00, 0xFCC1, 0xFD81, 0x3D40, 0xFF01, 0x3FC0, 0x3E80, 0xFE41,
+    0xFA01, 0x3AC0, 0x3B80, 0xFB41, 0x3900, 0xF9C1, 0xF881, 0x3840,
+    0x2800, 0xE8C1, 0xE981, 0x2940, 0xEB01, 0x2BC0, 0x2A80, 0xEA41,
+    0xEE01, 0x2EC0, 0x2F80, 0xEF41, 0x2D00, 0xEDC1, 0xEC81, 0x2C40,
+    0xE401, 0x24C0, 0x2580, 0xE541, 0x2700, 0xE7C1, 0xE681, 0x2640,
+    0x2200, 0xE2C1, 0xE381, 0x2340, 0xE101, 0x21C0, 0x2080, 0xE041,
+    0xA001, 0x60C0, 0x6180, 0xA141, 0x6300, 0xA3C1, 0xA281, 0x6240,
+    0x6600, 0xA6C1, 0xA781, 0x6740, 0xA501, 0x65C0, 0x6480, 0xA441,
+    0x6C00, 0xACC1, 0xAD81, 0x6D40, 0xAF01, 0x6FC0, 0x6E80, 0xAE41,
+    0xAA01, 0x6AC0, 0x6B80, 0xAB41, 0x6900, 0xA9C1, 0xA881, 0x6840,
+    0x7800, 0xB8C1, 0xB981, 0x7940, 0xBB01, 0x7BC0, 0x7A80, 0xBA41,
+    0xBE01, 0x7EC0, 0x7F80, 0xBF41, 0x7D00, 0xBDC1, 0xBC81, 0x7C40,
+    0xB401, 0x74C0, 0x7580, 0xB541, 0x7700, 0xB7C1, 0xB681, 0x7640,
+    0x7200, 0xB2C1, 0xB381, 0x7340, 0xB101, 0x71C0, 0x7080, 0xB041,
+    0x5000, 0x90C1, 0x9181, 0x5140, 0x9301, 0x53C0, 0x5280, 0x9241,
+    0x9601, 0x56C0, 0x5780, 0x9741, 0x5500, 0x95C1, 0x9481, 0x5440,
+    0x9C01, 0x5CC0, 0x5D80, 0x9D41, 0x5F00, 0x9FC1, 0x9E81, 0x5E40,
+    0x5A00, 0x9AC1, 0x9B81, 0x5B40, 0x9901, 0x59C0, 0x5880, 0x9841,
+    0x8801, 0x48C0, 0x4980, 0x8941, 0x4B00, 0x8BC1, 0x8A81, 0x4A40,
+    0x4E00, 0x8EC1, 0x8F81, 0x4F40, 0x8D01, 0x4DC0, 0x4C80, 0x8C41,
+    0x4400, 0x84C1, 0x8581, 0x4540, 0x8701, 0x47C0, 0x4680, 0x8641,
+    0x8201, 0x42C0, 0x4380, 0x8341, 0x4100, 0x81C1, 0x8081, 0x4040)
+
+CONST.RECV_BUFFER = 'RecvBuffer'
 
 
 # =============================================================================#
@@ -663,73 +749,56 @@ class RModbusExceptionMessage(RModbusMessage):
 
 # =============================================================================#
 class RModbusParms(RSerialParms):
-    def __init__(self, device, baudrate=9600, databits=8, parity='N', stopbits=1, timeout=300, rwpin=-1,
-                 recv_buffer=16384):
-        super(RModbusParms, self).__init__(device, baudrate, databits, parity, stopbits, timeout)
-        self.rwpin = rwpin
+    def __init__(self, device, baudrate=9600, databits=8, parity='N', stopbits=1, timeout=300, recv_buffer=16384):
+        super().__init__(device, baudrate, databits, parity, stopbits, timeout)
         self.recv_buffer = recv_buffer
 
     @classmethod
-    def create_from_serial_parms(cls, parms: RSerialParms, rwpin: str, recv_buffer: int):
+    def create_from_serial_parms(cls, parms: RSerialParms, recv_buffer: int):
         return cls(parms.device, baudrate=parms.baudrate, databits=parms.databits, parity=parms.parity,
-                   stopbits=parms.stopbits, timeout=parms.timeout, rwpin=rwpin, recv_buffer=recv_buffer)
+                   stopbits=parms.stopbits, timeout=parms.timeout, recv_buffer=recv_buffer)
 
     def __str__(self) -> str:
-        return 'Device:{} Baudrate:{} Databits:{} Parity:{} Stopbits:{} Timeout:{} RWPin:{}'.format(self.device,
+        return 'Device:{} Baudrate:{} Databits:{} Parity:{} Stopbits:{} Timeout:{} RecvBuffer:{}'.format(self.device,
                                                                                                     self.baudrate,
                                                                                                     self.databits,
                                                                                                     self.parity,
                                                                                                     self.stopbits,
                                                                                                     self.timeout,
-                                                                                                    self.rwpin)
+                                                                                                    self.recv_buffer)
 
 
 # =============================================================================#
 class RModbusConfig(RSerialConfig):
-    def __init__(self, section, config: ConfigParser):
-        super(RModbusConfig, self).__init__(section, config)
+    def __init__(self, section, config: RConfig):
+        super().__init__(section, config)
 
     def read(self) -> RModbusParms:
         s = super().read()
-        rwpin = self._conf.get(self.section, RMODBUS.RWPIN, RMODBUS.DEF_RWPIN)
-        recv_buffer = self._conf.getint(self.section, RMODBUS.RECV_BUFFER, RMODBUS.DEF_RECV_BUFFER)
-        return RModbusParms.create_from_serial_parms(s, rwpin, recv_buffer)
+        recv_buffer = self._config.conf.getint(self.section, CONST.RECV_BUFFER)
+        return RModbusParms.create_from_serial_parms(s, recv_buffer)
 
     def write(self, parms: RModbusParms):
+        self._config.conf.set(self.section, CONST.RECV_BUFFER, parms.recv_buffer)
         super().write(parms)
-        self._conf.set(self.section, RMODBUS.RWPIN, parms.rwpin)
-        self._conf.setint(self.section, RMODBUS.RECV_BUFFER, parms.recv_buffer)
+
 
 
 # =============================================================================#
 class RModbusComm(RSerialComm):
     def __init__(self, parms: RModbusParms):
-        super(RModbusComm, self).__init__(parms)
+        super().__init__(parms)
         self.tmodbus = 4 / (parms.baudrate / 10)
-        if parms.rwpin != None:
-            GPIO.setwarnings(False)
-            if GPIO.isRaspberry():
-                GPIO.setmode(GPIO.BOARD)
-            elif GPIO.isSunxi():
-                GPIO.setmode(GPIO.SUNXI)
-            else:
-                raise Exception('Not know processor !')
-            GPIO.setup(parms.rwpin, GPIO.OUT)
-            GPIO.output(parms.rwpin, GPIO.LOW)
 
     def exchange(self, send: RModbusMessage) -> RModbusMessage:
         RSerialComm.threadLock.acquire()
         try:
             d = send.get_exchange_data()
-            if self.parms.rwpin != None:
-                GPIO.output(self.parms.rwpin, GPIO.HIGH)
             time.sleep(self.tmodbus)
             self.write(d)
             self.flush()
             # while self.out_waiting() != 0:
             #     pass
-            if self.parms.rwpin != None:
-                GPIO.output(self.parms.rwpin, GPIO.LOW)
             time.sleep(self.tmodbus)
             r = RData()
             while True:
@@ -800,7 +869,7 @@ def teste_modbus():
     print(r8.tostring())
     r8.set_function(RModbusFunction.READ_HOLDING_REGISTER)
     print(r8.tostring())
-    print(r8.get_response_byte_count())
+    print(r8.get_response_byte_count)
     r8.add_byte(RByteType.BYTE8, 24)
     print(r8.tostring())
     r8.add_byte(RByteType.BYTE16, 12376)
@@ -859,16 +928,13 @@ def teste_modbus1():
 
 # =============================================================================#
 def teste_modbuscomm():
-    if platform.uname().node == 'raspberrypi':
-        GPIO.setmode(GPIO.BOARD)
-    else:
-        GPIO.setmode(GPIO.SUNXI)
-    GPIO.setwarnings(False)
-    config = ConfigParser(interpolation=ExtendedInterpolation())
+    config = RConfig(interpolation=ExtendedInterpolation())
     try:
         config.read('rmodbus.ini')
         config_comm = RModbusConfig('Modbus', config)
-        modbus_comm = RModbusComm(config_comm.read())
+        parms = config_comm.read()
+        print(parms)
+        modbus_comm = RModbusComm(parms)
         # send = RModbusReadCoilStatus.create(1, 1, 1)
         # send1 = RModbusReadHoldingRegister.create(1, 159, 8)
         # send2 = RModbusReadHoldingRegister.create(2, 159, 8)
