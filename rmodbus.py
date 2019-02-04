@@ -760,12 +760,12 @@ class RModbusParms(RSerialParms):
 
     def __str__(self) -> str:
         return 'Device:{} Baudrate:{} Databits:{} Parity:{} Stopbits:{} Timeout:{} RecvBuffer:{}'.format(self.device,
-                                                                                                    self.baudrate,
-                                                                                                    self.databits,
-                                                                                                    self.parity,
-                                                                                                    self.stopbits,
-                                                                                                    self.timeout,
-                                                                                                    self.recv_buffer)
+                                                                                                         self.baudrate,
+                                                                                                         self.databits,
+                                                                                                         self.parity,
+                                                                                                         self.stopbits,
+                                                                                                         self.timeout,
+                                                                                                         self.recv_buffer)
 
 
 # =============================================================================#
@@ -775,13 +775,12 @@ class RModbusConfig(RSerialConfig):
 
     def read(self) -> RModbusParms:
         s = super().read()
-        recv_buffer = self._config.conf.getint(self.section, CONST.RECV_BUFFER)
+        recv_buffer = self.config.getint(self.section, CONST.RECV_BUFFER)
         return RModbusParms.create_from_serial_parms(s, recv_buffer)
 
     def write(self, parms: RModbusParms):
-        self._config.conf.set(self.section, CONST.RECV_BUFFER, parms.recv_buffer)
+        self.config.set(self.section, CONST.RECV_BUFFER, parms.recv_buffer)
         super().write(parms)
-
 
 
 # =============================================================================#

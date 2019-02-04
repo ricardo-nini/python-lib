@@ -5,7 +5,7 @@ import platform
 
 
 def isRaspberry() -> bool:
-    return (platform.uname().node == 'raspberrypi' or platform.uname().node == 'demanda')
+    return (platform.uname().node == 'raspberrypi')
 
 
 def isSunxi() -> bool:

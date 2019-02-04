@@ -36,22 +36,22 @@ class RSerialParms(object):
 # =============================================================================#
 class RSerialConfig(RConfigParms):
     def read(self) -> RSerialParms:
-        device = self._config.conf.get(self.section, CONST.DEVICE)
-        baudrate = self._config.conf.getint(self.section, CONST.BAUDRATE)
-        databits = self._config.conf.getint(self.section, CONST.DATABITS)
-        parity = self._config.conf.get(self.section, CONST.PARITY)
-        stopbits = self._config.conf.getint(self.section, CONST.STOPBITS)
-        timeout = self._config.conf.getint(self.section, CONST.TIMEOUT)
+        device = self.config.get(self.section, CONST.DEVICE)
+        baudrate = self.config.getint(self.section, CONST.BAUDRATE)
+        databits = self.config.getint(self.section, CONST.DATABITS)
+        parity = self.config.get(self.section, CONST.PARITY)
+        stopbits = self.config.getint(self.section, CONST.STOPBITS)
+        timeout = self.config.getint(self.section, CONST.TIMEOUT)
         return RSerialParms(device, baudrate, databits, parity, stopbits, timeout)
 
     def write(self, parms: RSerialParms):
-        self._config.conf.set(self.section, CONST.DEVICE, parms.device)
-        self._config.conf.set(self.section, CONST.BAUDRATE, parms.baudrate)
-        self._config.conf.set(self.section, CONST.DATABITS, parms.databits)
-        self._config.conf.set(self.section, CONST.PARITY, parms.parity)
-        self._config.conf.set(self.section, CONST.STOPBITS, parms.stopbits)
-        self._config.conf.set(self.section, CONST.TIMEOUT, parms.timeout)
-        super().write(parms)
+        self.config.set(self.section, CONST.DEVICE, parms.device)
+        self.config.set(self.section, CONST.BAUDRATE, parms.baudrate)
+        self.config.set(self.section, CONST.DATABITS, parms.databits)
+        self.config.set(self.section, CONST.PARITY, parms.parity)
+        self.config.set(self.section, CONST.STOPBITS, parms.stopbits)
+        self.config.set(self.section, CONST.TIMEOUT, parms.timeout)
+        self.rconfig.write(parms)
 
 
 # =============================================================================#

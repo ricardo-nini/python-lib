@@ -91,7 +91,7 @@ class Daemonize(object):
             # We need to overwrite the pidfile if we got here.
             if old_pid:
                 with open(self.pid, "w") as pidfile:
-                    pidfile.write(old_pid)
+                    pidfile.write("%s\n" % (old_pid))
             sys.exit(1)
         # skip fork if foreground is specified
         if not self.foreground:
@@ -211,9 +211,8 @@ class Daemonize(object):
             except OSError:
                 self.syslogger.error("Unable to change uid.")
                 sys.exit(1)
-
         try:
-            lockfile.write("%s" % (os.getpid()))
+            lockfile.write("%s\n" % (os.getpid()))
             lockfile.flush()
         except IOError:
             self.syslogger.error("Unable to write pid to the pidfile.")

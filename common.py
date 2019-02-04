@@ -500,19 +500,15 @@ class RConfig(object):
         self._names = []
 
     @property
-    def conf(self):
+    def config(self):
         return self._config
 
     @property
-    def names(self):
-        return self._names
-
-    @property
-    def p0(self) -> PosixPath:
+    def path_config(self) -> PosixPath:
         return self._p0
 
     @property
-    def p1(self) -> PosixPath:
+    def path_config_def(self) -> PosixPath:
         return self._p1
 
     # raise FileNotFoundError when filename joined with paths not exist
@@ -533,7 +529,7 @@ class RConfig(object):
                 p0 = Path(path, self._filename)
                 p1 = Path(path, self._add_defatlt_prefix(self._filename))
                 if p0.is_file() and p1.is_file():
-                    self._load((p0, p1))
+                    self._load((str(p0), str(p1)))
                     self._p0 = p0
                     self._p1 = p1
                     return
@@ -541,7 +537,7 @@ class RConfig(object):
             for path in self._paths:
                 p0 = Path(path, self._filename)
                 if p0.is_file():
-                    self._load((p0,))
+                    self._load((str(p0),))
                     self._p0 = p0
                     self._p1 = PosixPath()
                     return
@@ -576,11 +572,10 @@ class RConfig(object):
 
     def _load(self, paths: tuple, encoding=None):
         if len(paths) == 2:
-            p = [paths[1]._str, paths[0]._str]
+            p = [paths[1], paths[0]]
         else:
-            p = paths[0]._str
+            p = paths[0]
         self._config.read(p, encoding)
-        self._names = p
 
     def _add_defatlt_prefix(self, filename) -> str:
         p = os.path.splitext(filename)
@@ -589,9 +584,9 @@ class RConfig(object):
 
 # =============================================================================#
 class RConfigParms(object):
-    def __init__(self, section, config: RConfig, main_section=''):
+    def __init__(self, section, rconfig: RConfig, main_section=''):
         self._section = section
-        self._config = config
+        self._rconfig = rconfig
         self._main_section = main_section
 
     @property
@@ -600,7 +595,11 @@ class RConfigParms(object):
 
     @property
     def config(self):
-        return self._config
+        return self._rconfig.config
+
+    @property
+    def rconfig(self):
+        return self._rconfig
 
     @property
     def main_section(self):
@@ -608,6 +607,6 @@ class RConfigParms(object):
 
     def str(self):
         ret = str()
-        for c in self._config.conf.options(self._section):
-            ret = ret + c + '=' + self._config.conf.get(self._section, c) + ';'
+        for c in self._rconfig.config.options(self._section):
+            ret = ret + c + '=' + self._rconfig.config.get(self._section, c) + ';'
         return ret
